@@ -226,15 +226,15 @@ const {
   generateItinerary,
   getSightseeingActivities,
 } = require("../services/openAiService");
+const duffelService = require("../services/duffelService");
 
-// ✅ Function to generate the trip plan
 const generateTripPlan = async (req, res) => {
   try {
     console.log("🚀 Generating trip plan...");
 
-    // 🟢 Extract user input
+    // Extract user input
     const {
-      startLocation,
+      startLocation, // e.g., "Los Angeles"
       countryCode,
       cityName,
       interests,
@@ -245,129 +245,102 @@ const generateTripPlan = async (req, res) => {
       budget,
       currency = "USD",
       guestNationality = "US",
+      flightOrigin, // e.g., "JFK"
+      flightDestination, // e.g., "LAX"
     } = req.body;
 
-    // 🛑 Validate required fields
-    if (!countryCode && !cityName) {
-      return res
-        .status(400)
-        .json({ message: "Either countryCode or cityName must be provided." });
-    }
-
-    // ✅ Step 1: Fetch Hotels from LiteAPI
-    console.log("📌 Fetching hotels...");
-    const hotels = await liteApiService.getHotels(
+    console.log("✅ Extracted Parameters:", {
       countryCode,
       cityName,
       checkInDate,
       checkOutDate,
-      budget,
-      3
-    );
+      flightOrigin,
+      flightDestination,
+    });
 
-    if (!hotels || hotels.length === 0) {
-      return res.status(404).json({
-        message: "No hotels available for the given destination and dates.",
-      });
-    }
-
-    console.log(`✅ Hotels Retrieved: ${hotels.length}`);
-
-    // ✅ Step 2: Fetch Hotel Rates for Selected Hotels
+    // Fetch hotel rates
     console.log("📌 Fetching hotel rates...");
-    const hotelIds = hotels.map((hotel) => hotel.id).filter((id) => id); // Remove null values
-
-    if (hotelIds.length === 0) {
-      return res
-        .status(404)
-        .json({ message: "No valid hotel IDs found for the given criteria." });
-    }
-
-    const hotelRates = await liteApiService.getHotelRates(
-      hotelIds,
+    const hotelRatesResponse = await liteApiService.getHotelRates(
+      cityName,
+      countryCode,
       checkInDate,
       checkOutDate,
-      numTravelers,
+      Number(numTravelers),
       [],
-      currency,
-      guestNationality
+      "USD",
+      guestNationality,
+      10
     );
 
-    if (!hotelRates || hotelRates.length === 0) {
-      return res.status(404).json({
-        message: "No rates found for the selected hotels.",
-      });
+    if (!hotelRatesResponse || hotelRatesResponse.length === 0) {
+      console.error("❌ ERROR: No hotel rates found.");
+      return res.status(404).json({ message: "No hotel rates found." });
     }
 
-    console.log(`✅ Hotel Rates Retrieved: ${hotelRates.length}`);
+    console.log("✅ Hotel Rates Retrieved:", hotelRatesResponse.length);
 
-    // ✅ Step 3: Fetch Weather Data
-    console.log("📌 Fetching weather...");
-    const weather = await liteApiService.getWeather(cityName || countryCode);
-    console.log("✅ Weather Data Retrieved.");
+    // Fetch first hotel details
+    const firstHotel = hotelRatesResponse[0];
+    console.log("📌 Fetching full details for hotel ID:", firstHotel.hotelId);
+    const fullHotelDetails = await liteApiService.getHotelDetails(
+      firstHotel.hotelId
+    );
 
-    // ✅ Step 4: Generate Itinerary using OpenAI
+    const firstHotelDetails = {
+      hotelId: firstHotel.hotelId,
+      name: fullHotelDetails?.name || "Unknown Hotel",
+      address: fullHotelDetails?.address || "N/A",
+      rating: fullHotelDetails?.rating || "N/A",
+      mainPhoto: fullHotelDetails?.main_photo || "N/A",
+      amenities: fullHotelDetails?.amenities || [],
+      roomTypes: firstHotel.roomTypes.map((room) => ({
+        name: room.rates[0].name || "No Name",
+        price: room.retailRate?.total?.[0]?.amount ?? "N/A",
+        currency: room.retailRate?.total?.[0]?.currency ?? currency,
+      })),
+    };
+
+    console.log("✅ First Hotel Details Processed:", firstHotelDetails);
+
+    // Fetch flights using Duffel API
+    console.log("📌 Searching for flights...");
+    const flights = await duffelService.searchFlights(
+      flightOrigin,
+      flightDestination,
+      checkInDate,
+      numTravelers
+    );
+
+    if (!flights) {
+      console.error("❌ ERROR: No flights found.");
+    } else {
+      console.log("✅ Flights Retrieved:", flights.data.length);
+    }
+
+    // Generate itinerary
     console.log("📌 Generating itinerary...");
     const itinerary = await generateItinerary(cityName, numNights, interests);
     console.log("✅ Itinerary Generated.");
 
-    // ✅ Step 5: Fetch Sightseeing Locations
+    // Fetch sightseeing locations
     console.log("📌 Fetching sightseeing locations...");
     const sightseeing = await getSightseeingActivities(cityName);
     console.log("✅ Sightseeing Locations Retrieved.");
 
-    // ✅ Step 6: Format Hotel Data
-    console.log("📌 Formatting hotel data...");
-    // ✅ Map rates with corresponding hotel details (matching by hotelId)
-    const formattedHotels = hotelRates.map((hotel) => {
-      // Find the hotel details from the `hotels` API response
-      const hotelDetails = hotels.find((h) => h.id === hotel.hotelId) || {};
-
-      return {
-        hotelId: hotel.hotelId,
-        name: hotelDetails.name || "Unknown Hotel", // ✅ Fetch hotel name
-        roomTypes: hotel.roomTypes.slice(0, 3).map((room) => {
-          const rate = room.rates?.[0] || {}; // Get the first rate safely
-          const retailRate =
-            rate.retailRate?.total && rate.retailRate.total.length > 0
-              ? rate.retailRate.total[0]
-              : { amount: "N/A", currency: "USD" };
-
-          return {
-            name: rate.name || "No Name",
-            maxOccupancy: rate.maxOccupancy || "N/A",
-            boardType: rate.boardType || "N/A",
-            price: retailRate.amount ?? "N/A",
-            currency: retailRate.currency ?? "USD",
-            taxesAndFees: rate.retailRate?.taxesAndFees ?? "N/A",
-            priceType: rate.priceType || "N/A",
-            offerRetailRate: room.offerRetailRate?.amount ?? "N/A",
-            suggestedSellingPrice: room.suggestedSellingPrice?.amount ?? "N/A",
-            offerInitialPrice: room.offerInitialPrice?.amount ?? "N/A",
-            refundableTag:
-              rate.cancellationPolicies?.refundableTag ?? "Unknown",
-            cancellationPolicy:
-              rate.cancellationPolicies?.cancelPolicyInfos || [],
-          };
-        }),
-      };
-    });
-
-    console.log(
-      "✅ Formatted Hotel Data:",
-      JSON.stringify(formattedHotels, null, 2)
-    );
-
-    // ✅ Step 7: Calculate Estimated Cost
+    // Calculate estimated cost
     console.log("📌 Calculating estimated cost...");
-    const estimatedCost = calculateTotalCost(
-      hotelRates,
-      numTravelers,
-      numNights
-    );
+    const estimatedCost = firstHotelDetails.roomTypes.reduce((acc, room) => {
+      return (
+        acc +
+        (room.price !== "N/A"
+          ? parseFloat(room.price) * numTravelers * numNights
+          : 0)
+      );
+    }, 0);
+
     console.log("✅ Estimated Cost:", estimatedCost);
 
-    // ✅ Final Trip Plan Response
+    // Final Trip Plan Response
     const tripPlan = {
       destination: cityName,
       startLocation,
@@ -375,9 +348,8 @@ const generateTripPlan = async (req, res) => {
       checkOutDate,
       numTravelers,
       numNights,
-      weather,
-      hotels: formattedHotels,
-      activities: itinerary,
+      flights: flights?.data || [],
+      hotels: [firstHotelDetails],
       sightseeing,
       estimatedCost,
     };
@@ -391,6 +363,160 @@ const generateTripPlan = async (req, res) => {
       .json({ message: "Error generating trip plan", error: error.message });
   }
 };
+
+// const generateTripPlan = async (req, res) => {
+//   try {
+//     console.log("🚀 Generating trip plan...");
+
+//     // Extract user input
+//     const {
+//       startLocation,
+//       countryCode,
+//       cityName,
+//       interests,
+//       numTravelers,
+//       numNights,
+//       checkInDate,
+//       checkOutDate,
+//       budget,
+//       currency = "USD",
+//       guestNationality = "US",
+//     } = req.body;
+
+//     console.log("✅ Extracted Parameters:", {
+//       countryCode,
+//       cityName,
+//       checkInDate,
+//       checkOutDate,
+//     });
+
+//     // Fetch hotel rates
+//     console.log("📌 Fetching hotel rates...");
+//     const hotelRatesResponse = await liteApiService.getHotelRates(
+//       cityName,
+//       countryCode,
+//       checkInDate,
+//       checkOutDate,
+//       Number(numTravelers),
+//       [],
+//       "USD",
+//       guestNationality,
+//       10
+//     );
+
+//     if (!hotelRatesResponse || hotelRatesResponse.length === 0) {
+//       console.error("❌ ERROR: No hotel rates found.");
+//       return res.status(404).json({ message: "No hotel rates found." });
+//     }
+
+//     console.log("✅ Hotel Rates Retrieved:", hotelRatesResponse.length);
+
+//     // Extract first hotel details
+//     const firstHotel = hotelRatesResponse[0];
+//     console.log("✅ First Hotel:", firstHotel);
+
+//     // Fetch additional hotel details using hotelId
+//     console.log(
+//       `📌 Fetching full details for hotel ID: ${firstHotel.hotelId}...`
+//     );
+//     const fullHotelDetails = await liteApiService.getHotelDetails(
+//       firstHotel.hotelId
+//     );
+
+//     if (!fullHotelDetails) {
+//       console.warn(
+//         `⚠️ Warning: No additional details found for hotel ID ${firstHotel.hotelId}`
+//       );
+//     } else {
+//       console.log("✅ Full Hotel Details Retrieved:", fullHotelDetails);
+//     }
+
+//     // Format first hotel details
+//     const firstHotelDetails = {
+//       hotelId: firstHotel.hotelId,
+//       data: fullHotelDetails,
+
+//       roomTypes: firstHotel.roomTypes.map((room) => {
+//         console.log("🔍 Checking Room:", room);
+
+//         return {
+//           name: room.rates[0].name || "No Name",
+//           maxOccupancy: room.rates[0].maxOccupancy || "N/A",
+//           boardType: room.rates[0].boardName || "N/A",
+//           price: room.retailRate?.total?.[0]?.amount ?? "N/A",
+//           currency: room.retailRate?.total?.[0]?.currency ?? currency,
+//           taxesAndFees: room.retailRate?.taxesAndFees || "N/A",
+//           priceType: room.rates[0].priceType || "N/A",
+//           offerRetailRate: room.offerRetailRate?.amount || "N/A",
+//           suggestedSellingPrice: room.suggestedSellingPrice?.amount || "N/A",
+//           offerInitialPrice: room.offerInitialPrice?.amount || "N/A",
+//           refundableTag: room.cancellationPolicies?.refundableTag || "N/A",
+//           cancellationPolicy:
+//             room.cancellationPolicies?.cancelPolicyInfos || [],
+//         };
+//       }),
+//     };
+
+//     console.log("✅ First Hotel Details Processed:", firstHotelDetails);
+
+//     // Extract the next 9 hotel IDs
+//     const nextHotelIds = hotelRatesResponse
+//       .slice(1, 10)
+//       .map((hotel) => hotel.hotelId);
+//     console.log("✅ Next 9 Hotel IDs:", nextHotelIds);
+
+//     // Fetch weather data
+//     const weather = hotelRatesResponse.weather || {};
+//     console.log("✅ Weather Data:", weather);
+
+//     // Generate itinerary
+//     console.log("📌 Generating itinerary...");
+//     const itinerary = await generateItinerary(cityName, numNights, interests);
+//     console.log("✅ Itinerary Generated.");
+
+//     // Fetch sightseeing locations
+//     console.log("📌 Fetching sightseeing locations...");
+//     const sightseeing = await getSightseeingActivities(cityName);
+//     console.log("✅ Sightseeing Locations Retrieved.");
+
+//     // Calculate Estimated Cost
+//     console.log("📌 Calculating estimated cost...");
+//     const estimatedCost = firstHotelDetails.roomTypes.reduce((acc, room) => {
+//       return (
+//         acc +
+//         (room.price !== "N/A"
+//           ? parseFloat(room.price) * numTravelers * numNights
+//           : 0)
+//       );
+//     }, 0);
+
+//     console.log("✅ Estimated Cost:", estimatedCost);
+
+//     // Final Trip Plan Response
+//     const tripPlan = {
+//       destination: cityName,
+//       startLocation,
+//       checkInDate,
+//       checkOutDate,
+//       numTravelers,
+//       numNights,
+//       weather,
+//       firstHotel: firstHotelDetails,
+//       nextHotelIds,
+//       activities: itinerary,
+//       sightseeing,
+//       estimatedCost,
+//     };
+
+//     console.log("✅ Trip Plan Generated Successfully!");
+//     res.json(tripPlan);
+//   } catch (error) {
+//     console.error("❌ ERROR: Failed to generate trip plan:", error);
+//     res
+//       .status(500)
+//       .json({ message: "Error generating trip plan", error: error.message });
+//   }
+// };
 
 // ✅ Helper function to calculate the total estimated cost
 const calculateTotalCost = (hotels, numTravelers, numNights) => {

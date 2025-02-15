@@ -330,32 +330,48 @@ const getHotels = async (
   }
 };
 
-// Fetch hotel rates
 const getHotelRates = async (
-  hotelIds,
-  checkInDate,
-  checkOutDate,
-  adults,
+  cityName,
+  countryCode,
+  checkInDate, // ✅ Expecting YYYY-MM-DD format
+  checkOutDate, // ✅ Expecting YYYY-MM-DD format
+  numTravelers, // ✅ Should be a number
   childrenAges = [],
   currency = "USD",
   guestNationality = "US",
-  roomLimit = 3
+  limit = 10
 ) => {
   try {
-    console.log(
-      `📌 Fetching hotel rates for hotels: ${hotelIds.join(", ")}...`
-    );
+    console.log("📌 Fetching hotel rates with extended parameters...");
 
+    // ✅ Corrected Request Body
     const requestBody = {
-      hotelIds,
-      checkin: checkInDate,
-      checkout: checkOutDate,
-      occupancies: [{ adults, children: childrenAges }],
-      currency,
+      countryCode: countryCode || "US", // ✅ Ensure countryCode is provided
+      cityName, // ✅ City name correctly mapped
+      checkin: String(checkInDate), // ✅ Ensure checkin is in "YYYY-MM-DD" format
+      checkout: String(checkOutDate), // ✅ Ensure checkout is in "YYYY-MM-DD" format
+      occupancies: [
+        {
+          adults: Number(numTravelers) || 1, // ✅ Convert `numTravelers` to number
+          children: Array.isArray(childrenAges) ? childrenAges : [], // ✅ Ensure children is an array
+          roomCount: 1,
+        },
+      ],
+      currency: "USD", // ✅ Ensure currency is "USD"
       guestNationality,
-      limit: roomLimit,
+      limit,
+      weatherInfo: true,
+      minRating: 4,
+      sort: [{ field: "price", direction: "ascending" }],
+      maxRatesPerHotel: 2,
     };
 
+    console.log(
+      "📤 Sending Corrected Request Body:",
+      JSON.stringify(requestBody, null, 2)
+    );
+
+    // ✅ API Call
     const response = await axios.post(
       `${API_BASE_URL}/hotels/rates`,
       requestBody,
@@ -368,14 +384,17 @@ const getHotelRates = async (
       }
     );
 
+    console.log("✅ Hotel Rates Response:", response.data);
     return response.data.data || [];
   } catch (error) {
-    console.error("❌ ERROR: Failed to fetch hotel rates:", error.message);
+    console.error(
+      "❌ ERROR: Failed to fetch hotel rates:",
+      error.response?.data || error.message
+    );
     return [];
   }
 };
 
-// Fetch single hotel details
 const getHotelDetails = async (hotelId) => {
   try {
     console.log(`📌 Fetching details for hotel ID: ${hotelId}...`);
