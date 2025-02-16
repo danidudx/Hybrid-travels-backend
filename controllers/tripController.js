@@ -234,7 +234,7 @@ const generateTripPlan = async (req, res) => {
 
     // Extract user input
     const {
-      startLocation, // e.g., "Los Angeles"
+      startLocation,
       countryCode,
       cityName,
       interests,
@@ -245,8 +245,8 @@ const generateTripPlan = async (req, res) => {
       budget,
       currency = "USD",
       guestNationality = "US",
-      flightOrigin, // e.g., "JFK"
-      flightDestination, // e.g., "LAX"
+      flightOrigin,
+      flightDestination,
     } = req.body;
 
     console.log("✅ Extracted Parameters:", {
@@ -258,7 +258,7 @@ const generateTripPlan = async (req, res) => {
       flightDestination,
     });
 
-    // Fetch hotel rates
+    // ✅ Fetch hotel rates
     console.log("📌 Fetching hotel rates...");
     const hotelRatesResponse = await liteApiService.getHotelRates(
       cityName,
@@ -267,7 +267,7 @@ const generateTripPlan = async (req, res) => {
       checkOutDate,
       Number(numTravelers),
       [],
-      "USD",
+      currency,
       guestNationality,
       10
     );
@@ -279,7 +279,7 @@ const generateTripPlan = async (req, res) => {
 
     console.log("✅ Hotel Rates Retrieved:", hotelRatesResponse.length);
 
-    // Fetch first hotel details
+    // ✅ Fetch first hotel details
     const firstHotel = hotelRatesResponse[0];
     console.log("📌 Fetching full details for hotel ID:", firstHotel.hotelId);
     const fullHotelDetails = await liteApiService.getHotelDetails(
@@ -294,40 +294,82 @@ const generateTripPlan = async (req, res) => {
       mainPhoto: fullHotelDetails?.main_photo || "N/A",
       amenities: fullHotelDetails?.amenities || [],
       roomTypes: firstHotel.roomTypes.map((room) => ({
-        name: room.rates[0].name || "No Name",
-        price: room.retailRate?.total?.[0]?.amount ?? "N/A",
-        currency: room.retailRate?.total?.[0]?.currency ?? currency,
+        name: room.rates[0]?.name || "No Name",
+        price: room.rates[0].retailRate.total[0].amount ?? "N/A",
+        currency: room.rates[0].retailRate.total?.[0]?.currency ?? currency,
       })),
     };
 
     console.log("✅ First Hotel Details Processed:", firstHotelDetails);
 
-    // Fetch flights using Duffel API
+    // ✅ Fetch flights using Duffel API
     console.log("📌 Searching for flights...");
-    const flights = await duffelService.searchFlights(
+    const flightResponse = await duffelService.searchFlights(
       flightOrigin,
       flightDestination,
       checkInDate,
       numTravelers
     );
 
-    if (!flights) {
-      console.error("❌ ERROR: No flights found.");
+    let selectedFlight = null;
+
+    if (
+      flightResponse &&
+      flightResponse.data &&
+      flightResponse.data.data &&
+      flightResponse.data.data.offers &&
+      flightResponse.data.data.offers.length > 0
+    ) {
+      console.log(
+        "✅ Flights Retrieved:",
+        flightResponse.data.data.offers.length
+      );
+
+      const flightOffers = flightResponse.data.data.offers;
+
+      // ✅ Select the cheapest flight
+      selectedFlight = flightOffers.reduce((cheapest, flight) => {
+        return !cheapest ||
+          parseFloat(flight.total_amount) < parseFloat(cheapest.total_amount)
+          ? flight
+          : cheapest;
+      }, null);
+
+      console.log("✅ Selected Flight:", selectedFlight);
     } else {
-      console.log("✅ Flights Retrieved:", flights.data.length);
+      console.error("❌ ERROR: No flights found.");
     }
 
-    // Generate itinerary
+    // ✅ Format selected flight data
+    const formattedFlight = selectedFlight
+      ? {
+          flightId: selectedFlight.id,
+          departure: selectedFlight.slices[0]?.origin?.name || "Unknown",
+          arrival: selectedFlight.slices[0]?.destination?.name || "Unknown",
+          departureTime:
+            selectedFlight.slices[0]?.segments[0]?.departing_at || "Unknown",
+          arrivalTime:
+            selectedFlight.slices[0]?.segments[
+              selectedFlight.slices[0]?.segments.length - 1
+            ]?.arriving_at || "Unknown",
+          airline: selectedFlight.owner?.name || "Unknown Airline",
+          totalAmount: selectedFlight.total_amount || "N/A",
+          currency: selectedFlight.total_currency || "N/A",
+          owner: selectedFlight.owner || "N/A",
+        }
+      : null;
+
+    // ✅ Generate itinerary
     console.log("📌 Generating itinerary...");
     const itinerary = await generateItinerary(cityName, numNights, interests);
     console.log("✅ Itinerary Generated.");
 
-    // Fetch sightseeing locations
+    // ✅ Fetch sightseeing locations
     console.log("📌 Fetching sightseeing locations...");
     const sightseeing = await getSightseeingActivities(cityName);
     console.log("✅ Sightseeing Locations Retrieved.");
 
-    // Calculate estimated cost
+    // ✅ Calculate estimated cost
     console.log("📌 Calculating estimated cost...");
     const estimatedCost = firstHotelDetails.roomTypes.reduce((acc, room) => {
       return (
@@ -340,7 +382,7 @@ const generateTripPlan = async (req, res) => {
 
     console.log("✅ Estimated Cost:", estimatedCost);
 
-    // Final Trip Plan Response
+    // ✅ Final Trip Plan Response
     const tripPlan = {
       destination: cityName,
       startLocation,
@@ -348,7 +390,7 @@ const generateTripPlan = async (req, res) => {
       checkOutDate,
       numTravelers,
       numNights,
-      flights: flights?.data || [],
+      flight: formattedFlight,
       hotels: [firstHotelDetails],
       sightseeing,
       estimatedCost,

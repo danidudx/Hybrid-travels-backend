@@ -38,7 +38,6 @@ const searchFlights = async (
 
     const requestBody = {
       data: {
-        // ✅ Wrap request under "data"
         slices: [
           {
             origin,
@@ -46,21 +45,21 @@ const searchFlights = async (
             departure_date: departureDate,
           },
         ],
-        passengers: Array(adults).fill({ type: "adult" }), // Creates passenger objects
-        cabin_class: "economy", // Options: economy, premium_economy, business, first
-        max_connections: 1, // Limit stopovers
+        passengers: Array(adults).fill({ type: "adult" }),
+        cabin_class: "economy",
+        max_connections: 1,
       },
     };
 
     console.log(
-      "📤 Sending Corrected Request Body:",
+      "📤 Sending Request Body:",
       JSON.stringify(requestBody, null, 2)
     );
 
     const response = await duffelClient.post("/offer_requests", requestBody);
     console.log("✅ Flights Retrieved:", response.data);
 
-    return response.data;
+    return response;
   } catch (error) {
     console.error(
       "❌ ERROR: Failed to fetch flights:",
