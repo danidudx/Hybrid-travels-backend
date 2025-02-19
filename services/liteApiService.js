@@ -348,7 +348,6 @@ const getHotelRates = async (
   try {
     console.log("📌 Fetching hotel rates with filters...");
 
-    // Request body setup (same as before)
     const requestBody = {
       countryCode,
       cityName,
@@ -370,7 +369,7 @@ const getHotelRates = async (
 
     console.log("📤 Request Body:", JSON.stringify(requestBody, null, 2));
 
-    // Call LiteAPI (same as before)
+    // ✅ Call LiteAPI
     const response = await axios.post(
       `${API_BASE_URL}/hotels/rates`,
       requestBody,
@@ -384,6 +383,7 @@ const getHotelRates = async (
     );
 
     let hotels = response?.data?.data || [];
+
     if (hotels.length === 0) {
       console.warn("⚠️ No hotels found in API response!");
       return [];
@@ -394,44 +394,69 @@ const getHotelRates = async (
     // Fetching the basic hotel details from the `hotels` array
     const hotelBasicDetails = response?.data?.hotels || [];
 
-    // Map hotels to return basic details and room rates (same as before)
+    // ✅ Map hotels to return basic details and room rates
     hotels = hotels.map((hotel) => {
       const hotelDetails =
-        hotelBasicDetails.find((h) => h.id === hotel.hotelId) || {};
+        hotelBasicDetails.find((h) => h.id === hotel.hotelId) || {}; // Find corresponding hotel details by hotelId
 
       // Get the first room from the roomTypes section
       const firstRoom = hotel.roomTypes?.[0]?.rates?.[0] || {};
 
-      // Store the selected hotel and room for later
-      if (!selectedHotelRoom && firstRoom.price) {
-        selectedHotelRoom = {
-          hotelId: hotel.hotelId,
-          hotelName: hotelDetails.name || "Unknown Hotel",
-          roomName: firstRoom.name || "Standard Room",
-          price: firstRoom.retailRate?.total?.[0]?.amount ?? "N/A",
-          currency: firstRoom.retailRate?.total?.[0]?.currency ?? currency,
-        };
-      }
-
       return {
-        hotelId: hotel.hotelId,
-        name: hotelDetails.name || "Unknown Hotel",
-        address: hotelDetails.address || "N/A",
-        rating: hotelDetails.rating || "N/A",
-        mainPhoto: hotelDetails.main_photo || "N/A",
+        hotelId: hotel.hotelId, // Hotel ID
+        name: hotelDetails.name || "Unknown Hotel", // Hotel name from the `hotels` array
+        address: hotelDetails.address || "N/A", // Hotel address from the `hotels` array
+        rating: hotelDetails.rating || "N/A", // Hotel rating from the `hotels` array
+        mainPhoto: hotelDetails.main_photo || "N/A", // Hotel main photo from the `hotels` array
         room: {
-          name: firstRoom.name || "Standard Room",
-          price: firstRoom.retailRate?.total?.[0]?.amount ?? "N/A",
-          currency: firstRoom.retailRate?.total?.[0]?.currency ?? currency,
-          boardType: firstRoom.boardType || "N/A",
+          name: firstRoom.name || "Standard Room", // Room name
+          price: firstRoom.retailRate?.total?.[0]?.amount ?? "N/A", // Room price
+          currency: firstRoom.retailRate?.total?.[0]?.currency ?? currency, // Room price currency
+          boardType: firstRoom.boardType || "N/A", // Room board type
         },
-        amenities: hotel.amenities || [],
+        amenities: hotel.amenities || [], // Fetch amenities if available
       };
     });
 
+    // ✅ Apply accommodation preferences:
+    if (accommodationPreference === "at_only_the_best") {
+      // Filter for 5-star hotels
+      hotels = hotels.filter((hotel) => hotel.rating >= 5);
+    } else if (accommodationPreference === "at_good_hotel") {
+      // Filter for 4-star hotels and above
+      hotels = hotels.filter((hotel) => hotel.rating >= 4);
+    } else if (accommodationPreference === "anywhere_within_budget") {
+      // Sort by price (cheapest first)
+      hotels = hotels.sort(
+        (a, b) => parseFloat(a.room.price) - parseFloat(b.room.price)
+      );
+    } else if (accommodationPreference === "with_locals") {
+      // Filter hotels that have amenities like guesthouses or homestays
+      hotels = hotels.filter(
+        (hotel) =>
+          hotel.amenities.includes("guesthouse") ||
+          hotel.amenities.includes("homestay")
+      );
+    }
+
+    // ✅ Filter based on budget
+    if (maxBudget) {
+      hotels = hotels.filter((hotel) => {
+        const price = hotel.room.price;
+        return price && parseFloat(price) <= maxBudget; // Filter hotels that are within the budget
+      });
+
+      if (hotels.length === 0) {
+        console.warn(
+          "⚠️ No hotels within budget! Returning all hotels instead."
+        );
+        // If no hotels found within budget, return all available hotels
+        hotels = hotels;
+      }
+    }
+
     console.log("✅ Formatted Hotels:", hotels.length, "hotels processed");
 
-    // Return the formatted hotels
     return hotels;
   } catch (error) {
     console.error(
