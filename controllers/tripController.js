@@ -9,33 +9,37 @@ const generateTripPlan = async (req, res) => {
   try {
     console.log("🚀 Generating trip plan...");
 
-    // Extract user input
+    // ✅ Extract User Inputs
     const {
       startLocation,
       countryCode,
       cityName,
-      interests,
+      interests, // User travel interests
       numTravelers,
       numNights,
       checkInDate,
       checkOutDate,
-      budget,
+      budget, // Budget for hotels & flights
       currency = "USD",
       guestNationality = "US",
       flightOrigin,
       flightDestination,
+      accommodationPreference, // New input for hotel filtering
     } = req.body;
 
-    console.log("✅ Extracted Parameters:", {
+    console.log("✅ Extracted User Inputs:", {
       countryCode,
       cityName,
       checkInDate,
       checkOutDate,
       flightOrigin,
       flightDestination,
+      interests,
+      accommodationPreference,
+      budget,
     });
 
-    // ✅ Fetch hotel rates
+    // ✅ Fetch Hotel Rates Based on User Preferences
     console.log("📌 Fetching hotel rates...");
     const hotelRatesResponse = await liteApiService.getHotelRates(
       cityName,
@@ -46,40 +50,21 @@ const generateTripPlan = async (req, res) => {
       [],
       currency,
       guestNationality,
-      10
+      10,
+      accommodationPreference, // Pass user preference
+      budget // Pass max budget
     );
 
     if (!hotelRatesResponse || hotelRatesResponse.length === 0) {
-      console.error("❌ ERROR: No hotel rates found.");
-      return res.status(404).json({ message: "No hotel rates found." });
+      console.error("❌ ERROR: No hotels found.");
+      return res
+        .status(404)
+        .json({ message: "No hotels available within your preferences." });
     }
 
     console.log("✅ Hotel Rates Retrieved:", hotelRatesResponse.length);
 
-    // ✅ Fetch first hotel details
-    const firstHotel = hotelRatesResponse[0];
-    console.log("📌 Fetching full details for hotel ID:", firstHotel.hotelId);
-    const fullHotelDetails = await liteApiService.getHotelDetails(
-      firstHotel.hotelId
-    );
-
-    const firstHotelDetails = {
-      hotelId: firstHotel.hotelId,
-      name: fullHotelDetails?.name || "Unknown Hotel",
-      address: fullHotelDetails?.address || "N/A",
-      rating: fullHotelDetails?.rating || "N/A",
-      mainPhoto: fullHotelDetails?.main_photo || "N/A",
-      amenities: fullHotelDetails?.amenities || [],
-      roomTypes: firstHotel.roomTypes.map((room) => ({
-        name: room.rates[0]?.name || "No Name",
-        price: room.rates[0].retailRate.total[0].amount ?? "N/A",
-        currency: room.rates[0].retailRate.total?.[0]?.currency ?? currency,
-      })),
-    };
-
-    console.log("✅ First Hotel Details Processed:", firstHotelDetails);
-
-    // ✅ Fetch flights using Duffel API
+    // ✅ Fetch Flights Using Duffel API (With Budget Constraint)
     console.log("📌 Searching for flights...");
     const flightResponse = await duffelService.searchFlights(
       flightOrigin,
@@ -101,23 +86,29 @@ const generateTripPlan = async (req, res) => {
         "✅ Flights Retrieved:",
         flightResponse.data.data.offers.length
       );
-
       const flightOffers = flightResponse.data.data.offers;
 
-      // ✅ Select the cheapest flight
+      // ✅ Select the cheapest flight within budget
       selectedFlight = flightOffers.reduce((cheapest, flight) => {
+        const flightCost = parseFloat(flight.total_amount);
         return !cheapest ||
-          parseFloat(flight.total_amount) < parseFloat(cheapest.total_amount)
+          (flightCost <= budget &&
+            flightCost < parseFloat(cheapest.total_amount))
           ? flight
           : cheapest;
       }, null);
 
-      console.log("✅ Selected Flight:", selectedFlight);
+      if (!selectedFlight) {
+        console.error("❌ ERROR: No flights found within budget.");
+        selectedFlight = null;
+      } else {
+        console.log("✅ Selected Flight:", selectedFlight);
+      }
     } else {
       console.error("❌ ERROR: No flights found.");
     }
 
-    // ✅ Format selected flight data
+    // ✅ Format Selected Flight Data
     const formattedFlight = selectedFlight
       ? {
           flightId: selectedFlight.id,
@@ -132,30 +123,35 @@ const generateTripPlan = async (req, res) => {
           airline: selectedFlight.owner?.name || "Unknown Airline",
           totalAmount: selectedFlight.total_amount || "N/A",
           currency: selectedFlight.total_currency || "N/A",
-          owner: selectedFlight.owner || "N/A",
         }
       : null;
 
-    // ✅ Generate itinerary
+    // ✅ Generate Itinerary Based on Interests
     console.log("📌 Generating itinerary...");
     const itinerary = await generateItinerary(cityName, numNights, interests);
     console.log("✅ Itinerary Generated.");
 
-    // ✅ Fetch sightseeing locations
+    // ✅ Fetch Sightseeing Locations Based on Interests
     console.log("📌 Fetching sightseeing locations...");
-    const sightseeing = await getSightseeingActivities(cityName);
+    const sightseeing = await getSightseeingActivities(cityName, interests);
     console.log("✅ Sightseeing Locations Retrieved.");
 
-    // ✅ Calculate estimated cost
+    // ✅ Calculate Estimated Cost
     console.log("📌 Calculating estimated cost...");
-    const estimatedCost = firstHotelDetails.roomTypes.reduce((acc, room) => {
+    const estimatedHotelCost = hotelRatesResponse.reduce((acc, hotel) => {
       return (
         acc +
-        (room.price !== "N/A"
-          ? parseFloat(room.price) * numTravelers * numNights
-          : 0)
+        (hotel.roomTypes?.[0]?.rates?.[0]?.retailRate?.total?.[0]?.amount ??
+          0) *
+          numTravelers *
+          numNights
       );
     }, 0);
+
+    const estimatedFlightCost = formattedFlight
+      ? parseFloat(formattedFlight.totalAmount)
+      : 0;
+    const estimatedCost = estimatedHotelCost + estimatedFlightCost;
 
     console.log("✅ Estimated Cost:", estimatedCost);
 
@@ -168,7 +164,7 @@ const generateTripPlan = async (req, res) => {
       numTravelers,
       numNights,
       flight: formattedFlight,
-      hotels: [firstHotelDetails],
+      hotels: hotelRatesResponse,
       sightseeing,
       estimatedCost,
     };

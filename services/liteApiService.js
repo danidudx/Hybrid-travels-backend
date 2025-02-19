@@ -330,48 +330,47 @@ const getHotels = async (
   }
 };
 
+let selectedHotelRoom = null;
+
 const getHotelRates = async (
   cityName,
   countryCode,
-  checkInDate, // ✅ Expecting YYYY-MM-DD format
-  checkOutDate, // ✅ Expecting YYYY-MM-DD format
-  numTravelers, // ✅ Should be a number
+  checkInDate,
+  checkOutDate,
+  numTravelers,
   childrenAges = [],
   currency = "USD",
   guestNationality = "US",
-  limit = 10
+  limit = 10,
+  accommodationPreference,
+  maxBudget
 ) => {
   try {
-    console.log("📌 Fetching hotel rates with extended parameters...");
+    console.log("📌 Fetching hotel rates with filters...");
 
-    // ✅ Corrected Request Body
+    // Request body setup (same as before)
     const requestBody = {
-      countryCode: countryCode || "US", // ✅ Ensure countryCode is provided
-      cityName, // ✅ City name correctly mapped
-      checkin: String(checkInDate), // ✅ Ensure checkin is in "YYYY-MM-DD" format
-      checkout: String(checkOutDate), // ✅ Ensure checkout is in "YYYY-MM-DD" format
+      countryCode,
+      cityName,
+      checkin: checkInDate,
+      checkout: checkOutDate,
       occupancies: [
         {
-          adults: Number(numTravelers) || 1, // ✅ Convert `numTravelers` to number
-          children: Array.isArray(childrenAges) ? childrenAges : [], // ✅ Ensure children is an array
+          adults: Number(numTravelers) || 1,
+          children: Array.isArray(childrenAges) ? childrenAges : [],
           roomCount: 1,
         },
       ],
-      currency: "USD", // ✅ Ensure currency is "USD"
+      currency,
       guestNationality,
       limit,
-      weatherInfo: true,
-      minRating: 4,
       sort: [{ field: "price", direction: "ascending" }],
-      maxRatesPerHotel: 2,
+      maxRatesPerHotel: 5,
     };
 
-    console.log(
-      "📤 Sending Corrected Request Body:",
-      JSON.stringify(requestBody, null, 2)
-    );
+    console.log("📤 Request Body:", JSON.stringify(requestBody, null, 2));
 
-    // ✅ API Call
+    // Call LiteAPI (same as before)
     const response = await axios.post(
       `${API_BASE_URL}/hotels/rates`,
       requestBody,
@@ -384,11 +383,59 @@ const getHotelRates = async (
       }
     );
 
-    console.log("✅ Hotel Rates Response:", response.data);
-    return response.data.data || [];
+    let hotels = response?.data?.data || [];
+    if (hotels.length === 0) {
+      console.warn("⚠️ No hotels found in API response!");
+      return [];
+    }
+
+    console.log("📌 Raw Hotel Data from API:", hotels.length, "hotels found");
+
+    // Fetching the basic hotel details from the `hotels` array
+    const hotelBasicDetails = response?.data?.hotels || [];
+
+    // Map hotels to return basic details and room rates (same as before)
+    hotels = hotels.map((hotel) => {
+      const hotelDetails =
+        hotelBasicDetails.find((h) => h.id === hotel.hotelId) || {};
+
+      // Get the first room from the roomTypes section
+      const firstRoom = hotel.roomTypes?.[0]?.rates?.[0] || {};
+
+      // Store the selected hotel and room for later
+      if (!selectedHotelRoom && firstRoom.price) {
+        selectedHotelRoom = {
+          hotelId: hotel.hotelId,
+          hotelName: hotelDetails.name || "Unknown Hotel",
+          roomName: firstRoom.name || "Standard Room",
+          price: firstRoom.retailRate?.total?.[0]?.amount ?? "N/A",
+          currency: firstRoom.retailRate?.total?.[0]?.currency ?? currency,
+        };
+      }
+
+      return {
+        hotelId: hotel.hotelId,
+        name: hotelDetails.name || "Unknown Hotel",
+        address: hotelDetails.address || "N/A",
+        rating: hotelDetails.rating || "N/A",
+        mainPhoto: hotelDetails.main_photo || "N/A",
+        room: {
+          name: firstRoom.name || "Standard Room",
+          price: firstRoom.retailRate?.total?.[0]?.amount ?? "N/A",
+          currency: firstRoom.retailRate?.total?.[0]?.currency ?? currency,
+          boardType: firstRoom.boardType || "N/A",
+        },
+        amenities: hotel.amenities || [],
+      };
+    });
+
+    console.log("✅ Formatted Hotels:", hotels.length, "hotels processed");
+
+    // Return the formatted hotels
+    return hotels;
   } catch (error) {
     console.error(
-      "❌ ERROR: Failed to fetch hotel rates:",
+      "❌ ERROR: Failed to fetch hotels:",
       error.response?.data || error.message
     );
     return [];
