@@ -382,6 +382,8 @@ const getHotelRates = async (
       }
     );
 
+    console.log("✅ Hotel Rates Response:", response);
+
     let hotels = response?.data?.data || [];
 
     if (hotels.length === 0) {
