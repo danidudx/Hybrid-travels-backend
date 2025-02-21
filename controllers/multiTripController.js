@@ -88,7 +88,7 @@ const generateMultiTripPlan = async (req, res) => {
   try {
     console.log("🚀 Generating multi-destination trip plan...");
 
-    const trips = req.body;
+    const trips = req.body; // Extract the trips array from request body
 
     if (!Array.isArray(trips) || trips.length === 0) {
       return res
@@ -217,10 +217,11 @@ const generateTripPlanInternal = async (tripData) => {
     if (tours.length >= numNights) {
       itinerary = await generateItineraryWithTours(cityName, numNights, tours);
     } else {
-      itinerary = await generateFullItinerary(
+      itinerary = await generateFullItineraryWithSightseeing(
         cityName,
         numNights,
         interests,
+        tours,
         sightseeing
       );
     }
@@ -285,30 +286,44 @@ const generateItineraryWithTours = async (cityName, numNights, tours) => {
 };
 
 // Function to generate full itinerary if not enough tours
-const generateFullItinerary = async (
+const generateFullItineraryWithSightseeing = async (
   cityName,
   numNights,
   interests,
+  tours,
   sightseeing
 ) => {
   const itinerary = [];
   const remainingDays = numNights;
 
-  const openAiItinerary = await generateItinerary(
-    cityName,
-    remainingDays,
-    interests
-  );
-
+  // First, try to fill in with the available tours
+  let tourIndex = 0;
   for (let i = 0; i < remainingDays; i++) {
-    if (i < openAiItinerary.length) {
-      itinerary.push(openAiItinerary[i]);
-    } else {
+    if (tourIndex < tours.length) {
+      const tour = tours[tourIndex];
+      const originalDescription =
+        tour.tourShortDescription || "No description available.";
+
+      const generatedDescription = await generateDescriptionUsingOpenAI(
+        originalDescription
+      );
+
       itinerary.push({
         day: i + 1,
-        activity: sightseeing[i % sightseeing.length]?.name || "Sightseeing",
+        activity: tour.tourName || "Tour Activity",
         description:
-          sightseeing[i % sightseeing.length]?.description ||
+          generatedDescription || "A special tour activity for today.",
+      });
+
+      tourIndex++; // Move to the next tour
+    } else {
+      // If we run out of tours, fallback to sightseeing
+      const sightseeingActivity = sightseeing[i % sightseeing.length];
+      itinerary.push({
+        day: i + 1,
+        activity: sightseeingActivity?.name || "Sightseeing",
+        description:
+          sightseeingActivity?.description ||
           "Visit the city's famous landmarks.",
       });
     }
@@ -317,5 +332,4 @@ const generateFullItinerary = async (
   return itinerary;
 };
 
-// Export the multi-destination function for routing
 module.exports = { generateMultiTripPlan };
