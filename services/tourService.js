@@ -86,8 +86,6 @@ const getToursForCity = async (cityName, countryName) => {
       }
     );
 
-    console.log("tours", toursResponse);
-
     return toursResponse.data.result || [];
   } catch (error) {
     console.error("❌ ERROR: Failed to fetch tours:", error);
