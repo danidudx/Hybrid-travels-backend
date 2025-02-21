@@ -4,10 +4,12 @@ const {
   getSightseeingActivities,
 } = require("../services/openAiService");
 const duffelService = require("../services/duffelService");
-const tourService = require("../services/tourService"); // Import the new tourService
+const tourService = require("../services/tourService");
 const ACTIVITY_LINKER_API_KEY = process.env.ACTIVITY_LINKER_API_KEY;
 const axios = require("axios");
+const { generateDescriptionUsingOpenAI } = require("../services/openAiService"); // Import the OpenAI function
 
+// Helper function to fetch tours for a given destination
 const getToursForCity = async (destination) => {
   try {
     const [cityName, countryName] = destination
@@ -28,7 +30,6 @@ const getToursForCity = async (destination) => {
       }
     );
 
-    // Find the countryId based on the country name
     const country = countryResponse.data.result.find(
       (item) => item.countryName.toLowerCase() === countryName.toLowerCase()
     );
@@ -37,22 +38,21 @@ const getToursForCity = async (destination) => {
       console.error("❌ Country not found in ActivityLinker API.");
       return [];
     }
+
     const countryId = country.countryId;
 
     // Step 2: Fetch the list of cities for the country
-    const cityResponse = await axios.get(
-      "https://api.activitylinker.com/api/apiTour/city",
+    const cityResponse = await axios.post(
+      `https://api.activitylinker.com/api/apiTour/city`,
+      { CountryId: countryId }, // JSON request body
       {
         headers: {
           Authorization: `Bearer ${ACTIVITY_LINKER_API_KEY}`,
-        },
-        params: {
-          countryId: countryId, // Using the countryId obtained
+          "Content-Type": "application/json",
         },
       }
     );
 
-    // Find the cityId based on the city name
     const city = cityResponse.data.result.find(
       (item) => item.cityName.toLowerCase() === cityName.toLowerCase()
     );
@@ -61,18 +61,17 @@ const getToursForCity = async (destination) => {
       console.error("❌ City not found in ActivityLinker API.");
       return [];
     }
+
     const cityId = city.cityId;
 
     // Step 3: Fetch tours based on the countryId and cityId
-    const toursResponse = await axios.get(
-      "https://api.activitylinker.com/api/apiTour/tourstaticdata",
+    const toursResponse = await axios.post(
+      `https://api.activitylinker.com/api/apiTour/tourstaticdata`,
+      { CountryId: countryId, CityId: cityId }, // JSON request body
       {
         headers: {
           Authorization: `Bearer ${ACTIVITY_LINKER_API_KEY}`,
-        },
-        params: {
-          countryId: countryId, // Provide countryId from previous step
-          cityId: cityId, // Provide cityId from matching city name
+          "Content-Type": "application/json",
         },
       }
     );
@@ -84,54 +83,76 @@ const getToursForCity = async (destination) => {
   }
 };
 
-const { generateDescriptionUsingOpenAI } = require("../services/openAiService"); // Import the OpenAI function
-
-const generateTripPlan = async (req, res) => {
+// Function to handle the multi-destination trip plan
+const generateMultiTripPlan = async (req, res) => {
   try {
-    console.log("🚀 Generating trip plan...");
+    console.log("🚀 Generating multi-destination trip plan...");
 
-    // ✅ Extract User Inputs
+    const trips = req.body;
+
+    if (!Array.isArray(trips) || trips.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Invalid trip data. Provide an array of trips." });
+    }
+
+    let multiTripPlan = [];
+
+    // Loop through each trip and process them
+    for (const trip of trips) {
+      console.log(
+        `📌 Processing trip from ${trip.startLocation} to ${trip.destination}...`
+      );
+      const tripPlan = await generateTripPlanInternal(trip);
+      multiTripPlan.push(tripPlan);
+    }
+
+    console.log("✅ Multi-Destination Trip Plan Generated Successfully!");
+    res.json({ trips: multiTripPlan });
+  } catch (error) {
+    console.error("❌ ERROR: Failed to generate multi-trip plan:", error);
+    res.status(500).json({
+      message: "Error generating multi-trip plan",
+      error: error.message,
+    });
+  }
+};
+
+// Helper function to generate a single trip plan
+const generateTripPlanInternal = async (tripData) => {
+  try {
     const {
       startLocation,
-      destination, // Updated to include both city and country
-      countryCode, // Country code for hotel filtering
-      interests, // User travel interests
+      destination,
+      countryCode,
+      interests,
       numTravelers,
       numNights,
       checkInDate,
       checkOutDate,
-      budget, // Budget for hotels & flights
+      budget,
       currency = "USD",
       guestNationality = "US",
       flightOrigin,
       flightDestination,
-      accommodationPreference, // New input for hotel filtering
-    } = req.body;
+      accommodationPreference,
+    } = tripData;
 
-    // ✅ Extract city and country from the new destination format (city, country)
     const [cityName, countryName] = destination
       .split(",")
       .map((item) => item.trim());
 
-    console.log("✅ Extracted User Inputs:", {
+    console.log("✅ Extracted Trip Data:", {
       startLocation,
       cityName,
       countryName,
       countryCode,
-      checkInDate,
-      checkOutDate,
-      flightOrigin,
-      flightDestination,
-      interests,
-      accommodationPreference,
-      budget,
     });
 
-    // ✅ Fetch Hotel Rates Based on User Preferences
-    console.log("📌 Fetching hotel rates...");
+    // Fetch flight, hotel, tour, and sightseeing data
     const hotelRatesResponse = await liteApiService.getHotelRates(
       cityName,
-      countryCode, // Use country code for hotel filtering
+      countryCode,
       checkInDate,
       checkOutDate,
       Number(numTravelers),
@@ -139,21 +160,15 @@ const generateTripPlan = async (req, res) => {
       currency,
       guestNationality,
       10,
-      accommodationPreference, // Pass user preference
-      budget // Pass max budget
+      accommodationPreference,
+      budget
     );
 
     if (!hotelRatesResponse || hotelRatesResponse.length === 0) {
       console.error("❌ ERROR: No hotels found.");
-      return res
-        .status(404)
-        .json({ message: "No hotels available within your preferences." });
+      return { message: "No hotels found for destination" };
     }
 
-    console.log("✅ Hotel Rates Retrieved:", hotelRatesResponse.length);
-
-    // ✅ Fetch Flights Using Duffel API (With Budget Constraint)
-    console.log("📌 Searching for flights...");
     const flightResponse = await duffelService.searchFlights(
       flightOrigin,
       flightDestination,
@@ -162,21 +177,11 @@ const generateTripPlan = async (req, res) => {
     );
 
     let selectedFlight = null;
-
     if (
-      flightResponse &&
-      flightResponse.data &&
-      flightResponse.data.data &&
       flightResponse.data.data.offers &&
       flightResponse.data.data.offers.length > 0
     ) {
-      console.log(
-        "✅ Flights Retrieved:",
-        flightResponse.data.data.offers.length
-      );
       const flightOffers = flightResponse.data.data.offers;
-
-      // Select the cheapest flight within budget
       selectedFlight = flightOffers.reduce((cheapest, flight) => {
         const flightCost = parseFloat(flight.total_amount);
         return !cheapest ||
@@ -185,18 +190,8 @@ const generateTripPlan = async (req, res) => {
           ? flight
           : cheapest;
       }, null);
-
-      if (!selectedFlight) {
-        console.error("❌ ERROR: No flights found within budget.");
-        selectedFlight = null;
-      } else {
-        console.log("✅ Selected Flight:", selectedFlight);
-      }
-    } else {
-      console.error("❌ ERROR: No flights found.");
     }
 
-    // Format Selected Flight Data
     const formattedFlight = selectedFlight
       ? {
           flightId: selectedFlight.id,
@@ -214,17 +209,10 @@ const generateTripPlan = async (req, res) => {
         }
       : null;
 
-    // ✅ Fetch Tours Based on User Preferences and City
-    console.log("📌 Fetching tours...");
-    const tours = await tourService.getToursForCity(cityName, countryName);
-    console.log("✅ Tours Retrieved:", tours.length);
-
-    // ✅ Fetch Sightseeing Locations Based on Interests
-    console.log("📌 Fetching sightseeing locations...");
+    // Fetch Tours and Sightseeing data
+    const tours = await getToursForCity(destination);
     const sightseeing = await getSightseeingActivities(cityName, interests);
-    console.log("✅ Sightseeing Locations Retrieved.");
 
-    // ✅ Generate Itinerary Based on Tours or Sightseeing
     let itinerary = [];
     if (tours.length >= numNights) {
       itinerary = await generateItineraryWithTours(cityName, numNights, tours);
@@ -237,8 +225,7 @@ const generateTripPlan = async (req, res) => {
       );
     }
 
-    // ✅ Calculate Estimated Cost
-    console.log("📌 Calculating estimated cost...");
+    // Estimate the total cost
     const estimatedHotelCost = hotelRatesResponse.reduce((acc, hotel) => {
       return (
         acc +
@@ -254,10 +241,7 @@ const generateTripPlan = async (req, res) => {
       : 0;
     const estimatedCost = estimatedHotelCost + estimatedFlightCost;
 
-    console.log("✅ Estimated Cost:", estimatedCost);
-
-    // Final Trip Plan Response
-    const tripPlan = {
+    return {
       destination: cityName,
       startLocation,
       checkInDate,
@@ -266,32 +250,25 @@ const generateTripPlan = async (req, res) => {
       numNights,
       flight: formattedFlight,
       hotels: hotelRatesResponse,
-      sightseeing, // Add sightseeing places separately
-      tours, // Add tours separately
-      itinerary, // Generated itinerary
+      sightseeing,
+      tours,
+      itinerary,
       estimatedCost,
     };
-
-    console.log("✅ Trip Plan Generated Successfully!");
-    res.json(tripPlan);
   } catch (error) {
     console.error("❌ ERROR: Failed to generate trip plan:", error);
-    res
-      .status(500)
-      .json({ message: "Error generating trip plan", error: error.message });
+    return { message: "Error generating trip plan", error: error.message };
   }
 };
 
 // Function to generate itinerary with tours
 const generateItineraryWithTours = async (cityName, numNights, tours) => {
   const itinerary = [];
-
   for (let i = 0; i < numNights; i++) {
     const tour = tours[i % tours.length]; // Use tours for the days
     const originalDescription =
       tour.tourShortDescription || "No description available.";
 
-    // Generate more engaging description using OpenAI
     const generatedDescription = await generateDescriptionUsingOpenAI(
       originalDescription
     );
@@ -317,19 +294,16 @@ const generateFullItinerary = async (
   const itinerary = [];
   const remainingDays = numNights;
 
-  // Generate itinerary using OpenAI
   const openAiItinerary = await generateItinerary(
     cityName,
     remainingDays,
     interests
   );
 
-  // Fill the days with sightseeing or other activities
   for (let i = 0; i < remainingDays; i++) {
     if (i < openAiItinerary.length) {
       itinerary.push(openAiItinerary[i]);
     } else {
-      // Fallback to sightseeing if OpenAI doesn't provide enough activities
       itinerary.push({
         day: i + 1,
         activity: sightseeing[i % sightseeing.length]?.name || "Sightseeing",
@@ -343,62 +317,5 @@ const generateFullItinerary = async (
   return itinerary;
 };
 
-module.exports = { generateTripPlan };
-
-const calculateTotalCost = (hotels, numTravelers, numNights) => {
-  let totalCost = 0;
-
-  hotels.forEach((hotel) => {
-    if (hotel.roomTypes && hotel.roomTypes.length > 0) {
-      const firstRoom = hotel.roomTypes[0];
-      const pricePerNight =
-        firstRoom.price && firstRoom.price !== "N/A"
-          ? parseFloat(firstRoom.price)
-          : 0;
-
-      totalCost += pricePerNight * numTravelers * numNights;
-    }
-  });
-
-  return totalCost;
-};
-
-/**
- * ✅ Fetches rates for selected hotels.
- * @param {Request} req - The request object.
- * @param {Response} res - The response object.
- */
-const fetchHotelRates = async (req, res) => {
-  try {
-    const {
-      hotelIds,
-      checkInDate,
-      checkOutDate,
-      adults,
-      childrenAges,
-      currency,
-    } = req.body;
-
-    if (!hotelIds || hotelIds.length === 0) {
-      return res.status(400).json({ message: "Hotel IDs are required." });
-    }
-
-    const hotelRates = await liteApiService.getHotelRates(
-      hotelIds,
-      checkInDate,
-      checkOutDate,
-      adults,
-      childrenAges,
-      currency
-    );
-
-    res.json(hotelRates);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching hotel rates", error: error.message });
-  }
-};
-
-// ✅ Export functions
-module.exports = { generateTripPlan, fetchHotelRates };
+// Export the multi-destination function for routing
+module.exports = { generateMultiTripPlan };
