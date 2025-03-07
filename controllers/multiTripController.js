@@ -1,5 +1,6 @@
 const liteApiService = require("../services/liteApiService");
 const {
+  getIATACode,
   generateItinerary,
   getSightseeingActivities,
 } = require("../services/openAiService");
@@ -133,8 +134,8 @@ const generateTripPlanInternal = async (tripData) => {
       budget,
       currency = "USD",
       guestNationality = "US",
-      flightOrigin,
-      flightDestination,
+      // flightOrigin,
+      // flightDestination,
       accommodationPreference,
     } = tripData;
 
@@ -168,6 +169,11 @@ const generateTripPlanInternal = async (tripData) => {
       console.error("❌ ERROR: No hotels found.");
       return { message: "No hotels found for destination" };
     }
+    const flightOrigin = await getIATACode(startLocation);
+    console.log("IATA code for origin:", flightOrigin);
+    const flightDestination = await getIATACode(destination);
+    console.log("IATA code for destination:", flightDestination);
+    console.log("numtravelers:", numTravelers);
 
     const flightResponse = await duffelService.searchFlights(
       flightOrigin,
@@ -192,6 +198,7 @@ const generateTripPlanInternal = async (tripData) => {
       }, null);
     }
 
+    const fullFlightData = selectedFlight;
     const formattedFlight = selectedFlight
       ? {
           flightId: selectedFlight.id,
@@ -249,7 +256,7 @@ const generateTripPlanInternal = async (tripData) => {
       checkOutDate,
       numTravelers,
       numNights,
-      flight: formattedFlight,
+      flight: fullFlightData,
       hotels: hotelRatesResponse,
       sightseeing,
       tours,

@@ -313,6 +313,26 @@ const generateDescriptionUsingOpenAI = async (originalDescription) => {
     return originalDescription; // Fallback to original if OpenAI fails
   }
 };
+const getIATACode = async (location) => {
+  try {
+    const prompt = `Provide the nearest IATA code for the following location. strictly only provide single IATA code without anything else: ${location}`;
+
+    // Call OpenAI API to generate a new description
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        { role: "system", content: "You are a travel guide assistant." },
+        { role: "user", content: prompt },
+      ],
+    });
+
+    const generatedText = completion.choices[0].message.content.trim();
+    return generatedText;
+  } catch (error) {
+    console.error("Error generating description using OpenAI:", error);
+    return location; // Fallback to original if OpenAI fails
+  }
+};
 
 // Export functions for use in other parts of the project
 module.exports = {
@@ -320,4 +340,5 @@ module.exports = {
   getSightseeingActivities,
   generateDescriptionUsingOpenAI,
   generateItineraryWithTours,
+  getIATACode,
 };
