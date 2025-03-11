@@ -377,6 +377,39 @@ const generateOtherTours = async (city, usedTours, remainingDays) => {
   }
 };
 
+/**
+ * Function to generate a comprehensive summary of a tour using OpenAI
+ * @param {object} tourData - The tour data object containing details about the tour
+ * @returns {string} - A detailed, engaging summary of the tour
+ */
+const generateTourSummary = async (tourData) => {
+  try {
+    const prompt = `Create an engaging and comprehensive travel guide style summary for the following tour:
+Tour Name: ${tourData.tourName || 'N/A'}
+Description: ${tourData.tourShortDescription || 'N/A'}
+Duration: ${tourData.tourDuration || 'N/A'}
+Highlights: ${tourData.highlights || 'Various attractions'}
+
+Please include key attractions, activities, and special features in an engaging travel guide style.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: "You are an experienced travel guide creating engaging tour descriptions."
+        },
+        { role: "user", content: prompt }
+      ]
+    });
+
+    return completion.choices[0].message.content.trim();
+  } catch (error) {
+    console.error("Error generating tour summary:", error);
+    throw new Error("Failed to generate tour summary.");
+  }
+};
+
 // Export functions for use in other parts of the project
 module.exports = {
   generateItinerary,
@@ -385,4 +418,5 @@ module.exports = {
   generateItineraryWithTours,
   getIATACode,
   generateOtherTours,
+  generateTourSummary
 };
