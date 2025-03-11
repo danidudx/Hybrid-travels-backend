@@ -382,7 +382,7 @@ const getHotelRates = async (
       }
     );
 
-    console.log("✅ Hotel Rates Response:", response);
+    console.log("✅ Hotel Rates Response:", response.data);
 
     let hotels = response?.data?.data || [];
 

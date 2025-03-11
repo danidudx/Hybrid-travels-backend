@@ -293,9 +293,17 @@ const generateItineraryWithTours = async (cityName, numNights, tours) => {
 };
 
 // Function to generate richer descriptions using OpenAI
-const generateDescriptionUsingOpenAI = async (originalDescription) => {
+const generateDescriptionUsingOpenAI = async (
+  originalDescription,
+  originalTitle
+) => {
   try {
-    const prompt = `Rewrite the following description in a more engaging and descriptive manner. Make it sound like a travel guide writing it for tourists: ${originalDescription}`;
+    let prompt;
+    if (!originalDescription || originalDescription.trim() === "") {
+      prompt = `Generate a short and engaging description for the following tour title: ${originalTitle}`;
+    } else {
+      prompt = `Rewrite the following description in a more engaging and descriptive manner. Make it sound like a travel guide writing it for tourists: ${originalDescription}`;
+    }
 
     // Call OpenAI API to generate a new description
     const completion = await openai.chat.completions.create({
@@ -310,7 +318,7 @@ const generateDescriptionUsingOpenAI = async (originalDescription) => {
     return generatedText;
   } catch (error) {
     console.error("Error generating description using OpenAI:", error);
-    return originalDescription; // Fallback to original if OpenAI fails
+    return originalDescription || `A special tour activity: ${originalTitle}`; // Fallback to original if OpenAI fails
   }
 };
 const getIATACode = async (location) => {
@@ -334,6 +342,41 @@ const getIATACode = async (location) => {
   }
 };
 
+const generateOtherTours = async (city, usedTours, remainingDays) => {
+  try {
+    // Convert the usedTours Set to an array of tour names
+    const usedTourNames = Array.from(usedTours).join(", ");
+
+    // Create the OpenAI prompt based on whether there are any used tours or not
+    const prompt =
+      usedTours.size > 0
+        ? `Generate ${remainingDays} unique sightseeing activities for ${city} excluding the following tours: ${usedTourNames}. Each activity should have a title and a description. Provide the response in JSON format with keys 'name' and 'description'.`
+        : `Generate ${remainingDays} unique sightseeing activities for ${city}. Each activity should have a title and a description. Provide the response in JSON format with keys 'name' and 'description'.`;
+
+    // Call OpenAI to generate the list of sightseeing activities
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a travel assistant helping users find unique sightseeing activities.",
+        },
+        { role: "user", content: prompt },
+      ],
+    });
+
+    // Parse the response and return the generated activities
+    const generatedTours = JSON.parse(
+      completion.choices[0].message.content.trim()
+    );
+    return generatedTours;
+  } catch (error) {
+    console.error("Error generating other tours using OpenAI:", error);
+    return []; // Return an empty array if OpenAI fails
+  }
+};
+
 // Export functions for use in other parts of the project
 module.exports = {
   generateItinerary,
@@ -341,4 +384,5 @@ module.exports = {
   generateDescriptionUsingOpenAI,
   generateItineraryWithTours,
   getIATACode,
+  generateOtherTours,
 };
