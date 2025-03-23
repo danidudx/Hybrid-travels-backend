@@ -29,25 +29,38 @@ const searchFlights = async (
   origin,
   destination,
   departureDate,
-  adults = 1
+  adults = 1,
+  returnDate = null,
+  includeTransitDetails = true
 ) => {
   try {
     console.log(
       `📌 Searching for flights: ${origin} ➝ ${destination} on ${departureDate} for ${adults} adults...`
     );
 
+    const slices = [
+      {
+        origin,
+        destination,
+        departure_date: departureDate,
+      },
+    ];
+
+    // Add return flight slice if returnDate is provided
+    if (returnDate) {
+      slices.push({
+        origin: destination,
+        destination: origin,
+        departure_date: returnDate,
+      });
+    }
+
     const requestBody = {
       data: {
-        slices: [
-          {
-            origin,
-            destination,
-            departure_date: departureDate,
-          },
-        ],
+        slices,
         passengers: Array(adults).fill({ type: "adult" }),
         cabin_class: "economy",
-        max_connections: 1,
+        max_connections: includeTransitDetails ? 2 : 0,
       },
     };
 
@@ -57,8 +70,26 @@ const searchFlights = async (
     );
 
     const response = await duffelClient.post("/offer_requests", requestBody);
-    console.log("✅ Flights Retrieved:", response.data);
+    
+    if (includeTransitDetails && response.data?.data?.offers) {
+      const offers = response.data.data.offers.map(offer => ({
+        ...offer,
+        slices: offer.slices.map(slice => ({
+          ...slice,
+          segments: slice.segments.map(segment => ({
+            ...segment,
+            transit_details: segment.connecting_segments ? {
+              connection_duration: segment.connecting_duration,
+              transit_airport: segment.destination.iata_code,
+              next_flight_departure: segment.connecting_segments[0]?.departing_at
+            } : null
+          }))
+        }))
+      }));
+      response.data.data.offers = offers;
+    }
 
+    console.log("✅ Flights Retrieved:", response.data);
     return response;
   } catch (error) {
     console.error(
