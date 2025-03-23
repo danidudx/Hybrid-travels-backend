@@ -513,11 +513,8 @@ const generateTripPlanInternal = async (tripData) => {
 
     // Filter hotels within budget
     const hotelsWithinBudget = hotelRatesResponse.filter((hotel) => {
-      const hotelCost =
-        (hotel.roomTypes?.[0]?.rates?.[0]?.retailRate?.total?.[0]?.amount ??
-          0) *
-        numTravelers *
-        numNights;
+      // The price already includes the total cost for the stay
+      const hotelCost = hotel.room?.price ?? 0;
       return hotelCost <= budget;
     });
 
@@ -527,31 +524,20 @@ const generateTripPlanInternal = async (tripData) => {
         ? hotelsWithinBudget
         : [
             hotelRatesResponse.reduce((cheapest, hotel) => {
-              const hotelCost =
-                (hotel.roomTypes?.[0]?.rates?.[0]?.retailRate?.total?.[0]
-                  ?.amount ?? 0) *
-                numTravelers *
-                numNights;
+              const hotelCost = hotel.room?.price ?? 0;
               return !cheapest || hotelCost < cheapest.cost
                 ? { ...hotel, cost: hotelCost }
                 : cheapest;
-            }, null),
+            }, {}), // Initialize with an empty object to avoid null issues
           ];
 
-    // Step 3: Calculate total hotel cost
+    // Calculate total hotel cost
     const estimatedHotelCost = selectedHotels.reduce((acc, hotel) => {
-      // Log the entire hotel object to check its structure
-      //  console.log(`Hotel Raw Response:`, hotel);
+      // The price already includes the total cost for the stay
+      const hotelCost = hotel.room?.price ?? 0;
 
-      // Access the price directly from the 'room' object
-      const hotelCost = hotel.room?.price
-        ? hotel.room.price * numTravelers * numNights
-        : 0;
-
-      // Log individual hotel cost calculation
       console.log(
-        `Hotel: ${hotel.name}, Cost per night per traveler: ${hotel.room?.price}, ` +
-          `Total Hotel Cost for ${numTravelers} travelers for ${numNights} nights: ${hotelCost}`
+        `Hotel: ${hotel.name}, Total Hotel Cost: ${hotelCost} ${hotel.room?.currency}`
       );
 
       return acc + hotelCost;
@@ -895,7 +881,6 @@ const generateItineraryWithTours = async (cityName, numNights, tours) => {
 //   return itinerary;
 // };
 
-
 const generateFullItineraryWithSightseeing = async (
   cityName,
   numNights,
@@ -913,7 +898,8 @@ const generateFullItineraryWithSightseeing = async (
     if (tourIndex < tours.length) {
       // Assign the available tour to this day
       const tour = tours[tourIndex];
-      const originalDescription = tour.tourShortDescription || "No description available.";
+      const originalDescription =
+        tour.tourShortDescription || "No description available.";
       const originalTitle = tour.tourName;
       const generatedDescription = await generateDescriptionUsingOpenAI(
         originalDescription,
@@ -923,7 +909,8 @@ const generateFullItineraryWithSightseeing = async (
       itinerary.push({
         day: i + 1,
         activity: tour.tourName || "Tour Activity",
-        description: generatedDescription || "A special tour activity for today.",
+        description:
+          generatedDescription || "A special tour activity for today.",
         activityType: "tour", // Label this day as a "tour"
         tour: {
           tourId: tour.tourId,
@@ -960,7 +947,9 @@ const generateFullItineraryWithSightseeing = async (
     console.log("Generated remaining days activities:", response);
 
     // Ensure that response is an array, even if OpenAI returns a single object
-    const sightseeingActivities = Array.isArray(response) ? response : [response];
+    const sightseeingActivities = Array.isArray(response)
+      ? response
+      : [response];
 
     // Assign generated sightseeing activities
     sightseeingActivities.forEach((tour, index) => {
